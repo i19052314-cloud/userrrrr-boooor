@@ -51,8 +51,61 @@ def _in_mafia_groups(_, __, message):
 
 @Client.on_message(filters.command("mafia", prefix) & filters.me)
 async def mafia_join(client, message):
-    await client.send_message(MAFIA_BOT, f"/start {mafia_start}")
     await message.delete()
+
+    args = message.text.split(maxsplit=1)
+    if len(args) > 1:
+        arg = args[1].strip()
+        try:
+            target = int(arg)
+        except ValueError:
+            target = arg.lstrip("@")
+        try:
+            chat_obj = await client.get_chat(target)
+            target_id = chat_obj.id
+        except Exception as e:
+            await client.send_message(message.chat.id, f"<b>Не нашёл чат:</b> <code>{e}</code>")
+            return
+    else:
+        target_id = message.chat.id
+
+    found_param = None
+    async for msg in client.get_chat_history(target_id, limit=200):
+        text = msg.text or msg.caption or ""
+        m = MAFIA_LINK_RE.search(text)
+        if not m and msg.reply_markup and getattr(msg.reply_markup, "inline_keyboard", None):
+            for row in msg.reply_markup.inline_keyboard:
+                for b in row:
+                    mm = MAFIA_LINK_RE.search(getattr(b, "url", "") or "")
+                    if mm:
+                        m = mm
+                        break
+                if m:
+                    break
+        if m:
+            found_param = m.group(1)
+
+    if not found_param:
+        await client.send_message(
+            message.chat.id,
+            "<b>❌ Свежих ссылок на игру в этом чате нет.</b>\n"
+            "Как только появится «Ведётся набор в игру» или ссылка — вступлю автоматически.",
+        )
+        return
+
+    gid = _decode_group(found_param)
+    if gid:
+        mafia_groups.add(gid)
+
+    try:
+        await client.send_message(MAFIA_BOT, f"/start {found_param}")
+        await client.send_message(
+            message.chat.id,
+            "<b>✅ Вступил в игру по свежей ссылке из этого чата.</b>",
+        )
+    except Exception as e:
+        from utils.scripts import format_exc
+        await client.send_message("me", f"[Mafia .mafia error]\n{format_exc(e)}")
 
 
 @Client.on_message(filters.group & filters.text & ~filters.me)
