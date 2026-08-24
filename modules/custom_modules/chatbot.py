@@ -1,4 +1,5 @@
 #  Chatbot module: DeepSeek, answers everyone
+import logging
 import re
 
 import aiohttp
@@ -7,6 +8,8 @@ from pyrogram.types import Message
 
 from utils import modules_help, prefix
 from utils.config import deepseek_base_url, deepseek_key, deepseek_model, owner_id, owner_name
+
+log = logging.getLogger(__name__)
 
 _TRIGGER = filters.mentioned & filters.text & ~filters.me
 
@@ -59,7 +62,14 @@ async def _chat(prompt, system):
 
 @Client.on_message(_TRIGGER)
 async def chatbot(client, message: Message):
+    log.info(
+        "AI trigger: chat=%s user=%s text=%.50s",
+        message.chat.id,
+        message.from_user.id if message.from_user else "?",
+        message.text or "",
+    )
     if not deepseek_key:
+        log.error("AI не ответил: DEEPSEEK_KEY не задан!")
         await message.reply_text(
             "<b>DEEPSEEK_KEY не задан в переменных окружения!</b>"
         )
@@ -90,4 +100,37 @@ async def chatbot(client, message: Message):
         answer = re.sub(r"https?://\S+", "ссылка удалена", answer)
         await message.reply_text(answer)
     except Exception as e:
+        log.error("AI request failed: %s", e, exc_info=True)
         await message.reply_text(f"An error occurred: {e}")
+
+
+@Client.on_message(filters.command("aistatus", prefix) & filters.me)
+async def aistatus(_, message: Message):
+    lines = ["<b>🤖 AI ChatBot Status</b>", ""]
+    lines.append(f"• Модуль загружен: <b>да</b>")
+    lines.append(
+        f"• DEEPSEEK_KEY: "
+        + (f"<code>задан ({deepseek_key[:4]}...)</code>" if deepseek_key else "<b>❌ НЕ ЗАДАН!</b>")
+    )
+    lines.append(f"• URL API: <code>{deepseek_base_url}</code>")
+    lines.append(f"• Модель: <code>{deepseek_model}</code>")
+
+    if deepseek_key:
+        try:
+            answer = await _chat("ping", "Отвечай одним словом.")
+            lines.append("")
+            lines.append(f"✅ <b>Тестовый запрос OK:</b> {answer[:100]}")
+        except Exception as e:
+            lines.append("")
+            lines.append(f"❌ <b>Тестовый запрос упал:</b>\n<code>{e}</code>")
+            lines.append("→ проверьте ключ/модель/URL")
+    else:
+        lines.append("")
+        lines.append("→ Задайте DEEPSEEK_KEY в Variables на Railway")
+
+    await message.reply("\n".join(lines))
+
+
+modules_help["chatbot"] = {
+    "aistatus": "Показать статус ИИ и причину, почему он не отвечает",
+}
