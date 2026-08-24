@@ -2,7 +2,6 @@
 import base64
 import random
 import re
-import time
 
 from pyrogram import Client, filters
 
@@ -56,18 +55,9 @@ async def mafia_join(client, message):
     await message.delete()
 
 
-_last_autojoin = {}
-AUTOJOIN_COOLDOWN = 300
-
-
 @Client.on_message(filters.group & filters.text & ~filters.me)
 async def mafia_autojoin(client, message):
     text = message.text or ""
-    now = time.time()
-    key = message.chat.id
-
-    if _last_autojoin.get(key, 0) + AUTOJOIN_COOLDOWN > now:
-        return
 
     param = None
     m = MAFIA_LINK_RE.search(text)
@@ -82,13 +72,11 @@ async def mafia_autojoin(client, message):
     if not param:
         return
 
-    _last_autojoin[key] = now
     try:
         await client.send_message(MAFIA_BOT, f"/start {param}")
-        await message.reply("<b>🤖 Автоматически вступаю в игру...</b>")
     except Exception as e:
         from utils.scripts import format_exc
-        await message.reply(format_exc(e))
+        await client.send_message("me", f"[Mafia autojoin error]\n{format_exc(e)}")
 
 
 @Client.on_message(filters.user(MAFIA_BOT) & filters.create(_in_mafia_groups))
