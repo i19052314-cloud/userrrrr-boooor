@@ -7,7 +7,6 @@ from pyrogram.types import Message
 
 from utils import modules_help, prefix
 from utils.config import deepseek_base_url, deepseek_key, deepseek_model, owner_id, owner_name
-from utils.db import db
 
 _TRIGGER = filters.mentioned & filters.text & ~filters.me
 
@@ -60,8 +59,6 @@ async def _chat(prompt, system):
 
 @Client.on_message(_TRIGGER)
 async def chatbot(client, message: Message):
-    if not db.get("core.chatbot", "enabled", True):
-        return
     if not deepseek_key:
         await message.reply_text(
             "<b>DEEPSEEK_KEY не задан в переменных окружения!</b>"
@@ -94,21 +91,3 @@ async def chatbot(client, message: Message):
         await message.reply_text(answer)
     except Exception as e:
         await message.reply_text(f"An error occurred: {e}")
-
-
-@Client.on_message(filters.command("chatoff", prefix) & filters.me)
-async def chatoff(_, message: Message):
-    db.set("core.chatbot", "enabled", False)
-    await message.reply_text("<b>ChatBot is off now</b>")
-
-
-@Client.on_message(filters.command("chaton", prefix) & filters.me)
-async def chaton(_, message: Message):
-    db.set("core.chatbot", "enabled", True)
-    await message.reply_text("<b>ChatBot is on now</b>")
-
-
-modules_help["chatbot"] = {
-    "chatoff": "Turn off AI ChatBot",
-    "chaton": "Turn on AI ChatBot",
-}

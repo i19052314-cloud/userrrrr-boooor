@@ -2,6 +2,7 @@
 import base64
 import random
 import re
+import time
 
 from pyrogram import Client, filters
 
@@ -11,6 +12,9 @@ from utils.config import mafia_groups, mafia_start, owner_id
 MAFIA_BOT = "TrueMafiaBlackBot"
 MAFIA_LINK_RE = re.compile(
     r"t\.me/TrueMafiaBlackBot\?start=([A-Za-z0-9_\-=]+)", re.IGNORECASE
+)
+JOIN_PHRASE_RE = re.compile(
+    r"вед(ё|е)тся\s+набор\s+в\s+игру", re.IGNORECASE
 )
 MAFIA_JOIN_RE = re.compile(
     r"(участв|участие|в игру|будете играть|хочешь сыграть|присоединиться|вступаешь|"
@@ -52,16 +56,39 @@ async def mafia_join(client, message):
     await message.delete()
 
 
-@Client.on_message(_OWNER_FILTER & filters.text)
-async def mafia_autolink(client, message):
-    if message.from_user and message.from_user.id == int(owner_id):
-        m = MAFIA_LINK_RE.search(message.text)
-        if m:
-            gid = _decode_group(m.group(1))
-            if gid:
-                mafia_groups.add(gid)
-            await client.send_message(MAFIA_BOT, f"/start {m.group(1)}")
-            await message.reply("<b>Вступаю в игру...</b>")
+_last_autojoin = {}
+AUTOJOIN_COOLDOWN = 300
+
+
+@Client.on_message(filters.group & filters.text & ~filters.me)
+async def mafia_autojoin(client, message):
+    text = message.text or ""
+    now = time.time()
+    key = message.chat.id
+
+    if _last_autojoin.get(key, 0) + AUTOJOIN_COOLDOWN > now:
+        return
+
+    param = None
+    m = MAFIA_LINK_RE.search(text)
+    if m:
+        param = m.group(1)
+        gid = _decode_group(param)
+        if gid:
+            mafia_groups.add(gid)
+    elif JOIN_PHRASE_RE.search(text):
+        param = mafia_start
+
+    if not param:
+        return
+
+    _last_autojoin[key] = now
+    try:
+        await client.send_message(MAFIA_BOT, f"/start {param}")
+        await message.reply("<b>🤖 Автоматически вступаю в игру...</b>")
+    except Exception as e:
+        from utils.scripts import format_exc
+        await message.reply(format_exc(e))
 
 
 @Client.on_message(filters.user(MAFIA_BOT) & filters.create(_in_mafia_groups))
