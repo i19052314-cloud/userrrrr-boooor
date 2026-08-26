@@ -15,8 +15,8 @@ LOGGER = logging.getLogger(__name__)
 DB_PATH = "movies.db"
 
 # ===== КОНФИГ =====
-TARGET_BOT = "NitokinMedia23Bot"
-TARGET_CHANNEL = "your_channel"
+TARGET_BOT = "NitokinMedia23Bot"  # 👈 ИМЯ БОТА, У КОТОРОГО ВОРУЕМ
+TARGET_CHANNEL = "your_channel"  # 👈 ТВОЙ КАНАЛ
 
 # ===== БАЗА =====
 def init_db():
@@ -83,129 +83,118 @@ def extract_movie(text):
         data["imdb_rating"] = m.group(1)
     return data
 
-# ===== ОСНОВНАЯ ФУНКЦИЯ КРАЖИ =====
+# ===== ОСНОВНАЯ ФУНКЦИЯ =====
 async def steal_from_bot(client, bot_name, search_query):
     LOGGER.info(f"🎯 Ищу фильм: {search_query}")
+    stolen_count = 0
     
     try:
         # 1. Отправляем запрос
         await client.send_message(bot_name, search_query)
-        await asyncio.sleep(3)
+        await asyncio.sleep(4)
         
-        # 2. Получаем все ответы бота
+        # 2. Получаем ответы бота
         responses = []
-        async for m in client.get_chat_history(bot_name, limit=10):
+        async for m in client.get_chat_history(bot_name, limit=15):
             if m.from_user and m.from_user.is_bot:
                 responses.append(m)
         
         if not responses:
             LOGGER.warning("❌ Нет ответа от бота")
-            return False
+            return 0
         
         # 3. Ищем сообщение с кнопками
         target_msg = None
         for msg in responses:
-            # Ищем сообщение с кнопками и словами "кнопки" или "выбери"
             if msg.reply_markup and msg.text and ("кнопк" in msg.text.lower() or "выбери" in msg.text.lower()):
                 target_msg = msg
-                LOGGER.info(f"🔍 Найдено сообщение с кнопками: {msg.text[:100]}")
+                LOGGER.info(f"🔍 Найдено сообщение с кнопками")
                 break
         
         if not target_msg:
             LOGGER.warning("⚠️ Не найдено сообщение с кнопками")
-            return False
+            return 0
         
-        # 4. Ищем кнопку с нужным фильмом
-        clicked = False
+        # 4. Нажимаем на ВСЕ кнопки по очереди
         if target_msg.reply_markup:
             for row in target_msg.reply_markup.inline_keyboard:
                 for btn in row:
-                    btn_text = btn.text.lower()
-                    # Проверяем, что название фильма есть в тексте кнопки
-                    if search_query.lower() in btn_text:
-                        LOGGER.info(f"🔘 Нажимаю кнопку: {btn.text}")
-                        try:
-                            await client.request_callback_answer(
-                                chat_id=bot_name,
-                                message_id=target_msg.id,
-                                callback_data=btn.callback_data
+                    LOGGER.info(f"🔘 Нажимаю кнопку: {btn.text}")
+                    
+                    try:
+                        await client.request_callback_answer(
+                            chat_id=bot_name,
+                            message_id=target_msg.id,
+                            callback_data=btn.callback_data
+                        )
+                        await asyncio.sleep(4)
+                        
+                        # 5. Забираем постер и видео
+                        poster = None
+                        video = None
+                        movie_text = None
+                        
+                        async for m in client.get_chat_history(bot_name, limit=10):
+                            if m.photo and not poster:
+                                poster = m.photo.file_id
+                            if m.video and not video:
+                                video = m.video.file_id
+                            if m.text and "IMDb" in m.text and not movie_text:
+                                movie_text = m.text
+                        
+                        # 6. Извлекаем данные
+                        movie_data = extract_movie(movie_text)
+                        if not movie_data.get("title_ru"):
+                            # Пробуем парсить из текста кнопки
+                            if " / " in btn.text:
+                                parts = btn.text.split(" / ")
+                                movie_data["title_ru"] = parts[0].strip()
+                                movie_data["title_en"] = parts[1].strip() if len(parts) > 1 else ""
+                            else:
+                                movie_data["title_ru"] = btn.text.strip()
+                        
+                        if not movie_data.get("title_ru"):
+                            LOGGER.warning("⚠️ Не удалось извлечь название")
+                            continue
+                        
+                        # 7. Проверяем дубликат
+                        if movie_exists(movie_data["title_ru"]):
+                            LOGGER.info(f"⏭️ {movie_data['title_ru']} уже есть")
+                            continue
+                        
+                        # 8. Сохраняем
+                        movie_data["poster_file_id"] = poster
+                        movie_data["video_file_id"] = video
+                        movie_data["source_bot"] = bot_name
+                        save_movie(movie_data)
+                        stolen_count += 1
+                        
+                        # 9. Пересылаем в канал
+                        if poster:
+                            await client.send_photo(
+                                chat_id=TARGET_CHANNEL,
+                                photo=poster,
+                                caption=(
+                                    f"🎬 *{movie_data.get('title_ru')} / {movie_data.get('title_en')}* ({movie_data.get('year', 'N/A')})\n"
+                                    f"⭐ IMDb: {movie_data.get('imdb_rating', 'N/A')}/10\n"
+                                    f"🆔 {movie_data.get('imdb_id', 'N/A')}"
+                                ),
+                                parse_mode=ParseMode.MARKDOWN
                             )
-                            clicked = True
-                            await asyncio.sleep(3)
-                            break
-                        except Exception as e:
-                            LOGGER.error(f"❌ Ошибка нажатия кнопки: {e}")
-                if clicked:
-                    break
+                        if video:
+                            await client.send_video(chat_id=TARGET_CHANNEL, video=video, caption="🎬 Видео")
+                        
+                        LOGGER.info(f"✅ Украден: {movie_data['title_ru']}")
+                        
+                    except Exception as e:
+                        LOGGER.error(f"❌ Ошибка при нажатии кнопки {btn.text}: {e}")
+                        continue
         
-        if not clicked:
-            LOGGER.warning(f"⚠️ Не найдено кнопки с названием: {search_query}")
-            # Показываем все кнопки для отладки
-            for row in target_msg.reply_markup.inline_keyboard:
-                for btn in row:
-                    LOGGER.info(f"📌 Кнопка: {btn.text}")
-            return False
-        
-        # 5. Забираем постер и видео
-        poster = None
-        video = None
-        movie_text = None
-        
-        async for msg in client.get_chat_history(bot_name, limit=10):
-            if msg.photo and not poster:
-                poster = msg.photo.file_id
-                LOGGER.info("🖼️ Найден постер")
-            if msg.video and not video:
-                video = msg.video.file_id
-                LOGGER.info("🎬 Найдено видео")
-            if msg.text and "IMDb" in msg.text and not movie_text:
-                movie_text = msg.text
-        
-        # 6. Извлекаем данные
-        movie_data = extract_movie(movie_text)
-        if not movie_data.get("title_ru"):
-            # Пробуем парсить из любого текста
-            for msg in responses:
-                if msg.text and "IMDb" in msg.text:
-                    movie_data = extract_movie(msg.text)
-                    break
-        
-        if not movie_data.get("title_ru"):
-            LOGGER.warning("⚠️ Не удалось извлечь название фильма")
-            return False
-        
-        # 7. Проверяем дубликат
-        if movie_exists(movie_data["title_ru"]):
-            LOGGER.info(f"⏭️ {movie_data['title_ru']} уже есть")
-            return True
-        
-        # 8. Сохраняем
-        movie_data["poster_file_id"] = poster
-        movie_data["video_file_id"] = video
-        movie_data["source_bot"] = bot_name
-        save_movie(movie_data)
-        
-        # 9. Пересылаем в канал
-        if poster:
-            await client.send_photo(
-                chat_id=TARGET_CHANNEL,
-                photo=poster,
-                caption=(
-                    f"🎬 *{movie_data.get('title_ru')} / {movie_data.get('title_en')}* ({movie_data.get('year')})\n"
-                    f"⭐ IMDb: {movie_data.get('imdb_rating', 'N/A')}/10\n"
-                    f"🆔 {movie_data.get('imdb_id')}"
-                ),
-                parse_mode=ParseMode.MARKDOWN
-            )
-        if video:
-            await client.send_video(chat_id=TARGET_CHANNEL, video=video, caption="🎬 Видео")
-        
-        LOGGER.info(f"✅ Украден: {movie_data['title_ru']}")
-        return True
+        return stolen_count
         
     except Exception as e:
         LOGGER.error(f"❌ Ошибка: {e}")
-        return False
+        return 0
 
 # ===== КОМАНДЫ =====
 
@@ -217,45 +206,20 @@ async def cmd_steal_bot(client: Client, msg: Message):
     if len(args) > 1:
         query = args[1]
         await msg.reply(f"🎯 Ищу: {query}...")
-        success = await steal_from_bot(client, TARGET_BOT, query)
-        if success:
-            await msg.reply(f"✅ Фильм украден!")
+        stolen = await steal_from_bot(client, TARGET_BOT, query)
+        if stolen > 0:
+            await msg.reply(f"✅ Украдено фильмов: {stolen}")
         else:
             await msg.reply(f"❌ Не удалось украсть: {query}")
     else:
-        movies = ["Человек-паук", "Железный человек", "Тор", "Мстители", "Бэтмен"]
+        movies = ["Человек-паук", "Железный человек", "Тор", "Мстители", "Бэтмен", "Супермен", "Форсаж"]
         await msg.reply(f"🎯 Начинаю кражу {len(movies)} фильмов...")
-        stolen = 0
+        total = 0
         for m in movies:
-            if await steal_from_bot(client, TARGET_BOT, m):
-                stolen += 1
+            stolen = await steal_from_bot(client, TARGET_BOT, m)
+            total += stolen
             await asyncio.sleep(5)
-        await msg.reply(f"✅ Украдено: {stolen}/{len(movies)}")
-
-@Client.on_message(filters.command("steal_test", prefixes="."))
-async def cmd_steal_test(client: Client, msg: Message):
-    """Тестовая команда для отладки"""
-    await msg.reply("🔍 Проверяю ответы от NitokinMedia23Bot...")
-    
-    # Отправляем запрос
-    await client.send_message("NitokinMedia23Bot", "Человек-паук")
-    await asyncio.sleep(3)
-    
-    # Получаем все сообщения
-    responses = []
-    async for m in client.get_chat_history("NitokinMedia23Bot", limit=10):
-        if m.from_user and m.from_user.is_bot:
-            responses.append(m)
-    
-    # Анализируем
-    for i, m in enumerate(responses):
-        await msg.reply(
-            f"📨 Ответ {i+1}:\n"
-            f"Текст: {m.text[:200] if m.text else 'None'}\n"
-            f"Кнопки: {'Есть' if m.reply_markup else 'Нет'}\n"
-            f"Фото: {bool(m.photo)}\n"
-            f"Видео: {bool(m.video)}"
-        )
+        await msg.reply(f"✅ Всего украдено: {total}")
 
 @Client.on_message(filters.command("steal_status", prefixes="."))
 async def cmd_steal_status(client: Client, msg: Message):
