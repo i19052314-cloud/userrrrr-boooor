@@ -27,6 +27,7 @@ apiflash_key = os.getenv("APIFLASH_KEY", env.str("APIFLASH_KEY"))
 rmbg_key = os.getenv("RMBG_KEY", env.str("RMBG_KEY", ""))
 vt_key = os.getenv("VT_KEY", env.str("VT_KEY", ""))
 gemini_key = os.getenv("GEMINI_KEY", env.str("GEMINI_KEY", ""))
+anymodel_key = os.getenv("ANYMODEL_KEY", env.str("ANYMODEL_KEY", "sk-dc9d4b7df36ba555-clksq9-be530a2a"))
 deepseek_key = os.getenv("DEEPSEEK_KEY", env.str("DEEPSEEK_KEY", ""))
 deepseek_base_url = os.getenv(
     "DEEPSEEK_BASE_URL", env.str("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
