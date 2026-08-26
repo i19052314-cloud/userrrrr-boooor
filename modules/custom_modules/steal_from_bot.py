@@ -1,24 +1,22 @@
 """
 Модуль для кражи фильмов у чужого бота
 Для Moon-Userbot by @loveaideep
-Команды: .steal_bot, .steal_status, .steal_list, .steal_search
 """
 
 import asyncio
 import sqlite3
 import re
 import logging
-from pyrogram import filters, enums
+from pyrogram import filters, Client
 from pyrogram.types import Message
 from pyrogram.enums import ParseMode
-from main import app, userbot
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ===== КОНФИГ =====
 TARGET_BOT = "NitokinMoviesBot"  # ЧУЖОЙ БОТ (ЗАМЕНИ!)
-TARGET_CHANNEL = "your_movie_channel"  # ТВОЙ КАНАЛ (ЗАМЕНИ!)
+TARGET_CHANNEL = "your_channel"  # ТВОЙ КАНАЛ (ЗАМЕНИ!)
 DB_PATH = "movies.db"
 
 # ===== БАЗА ДАННЫХ =====
@@ -44,7 +42,6 @@ def init_db():
             )
         """)
         conn.commit()
-        logger.info("✅ База данных инициализирована")
 
 def movie_exists(title: str) -> bool:
     with sqlite3.connect(DB_PATH) as conn:
@@ -79,7 +76,7 @@ def save_movie(data: dict):
         logger.info(f"💾 Сохранён: {data.get('title_ru')}")
 
 # ===== ФУНКЦИИ ДЛЯ РАБОТЫ С БОТОМ =====
-async def send_message_to_bot(bot_username: str, text: str):
+async def send_message_to_bot(app: Client, bot_username: str, text: str):
     try:
         msg = await app.send_message(bot_username, text)
         await asyncio.sleep(2)
@@ -88,7 +85,7 @@ async def send_message_to_bot(bot_username: str, text: str):
         logger.error(f"Ошибка отправки боту: {e}")
         return None
 
-async def get_bot_response(bot_username: str, limit: int = 5):
+async def get_bot_response(app: Client, bot_username: str, limit: int = 5):
     try:
         responses = []
         async for msg in app.get_chat_history(bot_username, limit=limit):
@@ -99,7 +96,7 @@ async def get_bot_response(bot_username: str, limit: int = 5):
         logger.error(f"Ошибка получения ответа: {e}")
         return []
 
-async def click_button(bot_username: str, callback_data: str, message_id: int):
+async def click_button(app: Client, bot_username: str, callback_data: str, message_id: int):
     try:
         await app.request_callback_answer(
             chat_id=bot_username,
@@ -136,10 +133,10 @@ async def extract_movie_data(text: str) -> dict:
         data["download_link"] = download_match.group(1)
     return data
 
-async def steal_movie(bot_username: str, movie_title: str):
+async def steal_movie(app: Client, bot_username: str, movie_title: str):
     logger.info(f"🎯 Начинаю кражу: {movie_title}")
     
-    response = await send_message_to_bot(bot_username, movie_title)
+    response = await send_message_to_bot(app, bot_username, movie_title)
     if not response:
         logger.error(f"❌ Нет ответа от бота по запросу: {movie_title}")
         return
@@ -152,7 +149,7 @@ async def steal_movie(bot_username: str, movie_title: str):
         for button in row:
             if button.text and movie_title.lower() in button.text.lower():
                 logger.info(f"🔘 Нажимаю кнопку: {button.text}")
-                await click_button(bot_username, button.callback_data, response.id)
+                await click_button(app, bot_username, button.callback_data, response.id)
                 await asyncio.sleep(3)
                 
                 movie_data = None
@@ -176,7 +173,7 @@ async def steal_movie(bot_username: str, movie_title: str):
                         movie_data["poster_file_id"] = poster_id
                         movie_data["video_file_id"] = video_id
                         save_movie(movie_data)
-                        await forward_to_channel(movie_data, poster_id, video_id)
+                        await forward_to_channel(app, movie_data, poster_id, video_id)
                         logger.info(f"✅ Украден фильм: {movie_data['title_ru']}")
                     else:
                         logger.info(f"⏭️ Пропуск: {movie_data['title_ru']} уже есть")
@@ -184,7 +181,7 @@ async def steal_movie(bot_username: str, movie_title: str):
                     logger.warning(f"⚠️ Не удалось извлечь данные для: {movie_title}")
                 break
 
-async def forward_to_channel(data: dict, poster_id: str, video_id: str):
+async def forward_to_channel(app: Client, data: dict, poster_id: str, video_id: str):
     try:
         caption = (
             f"🎬 *{data.get('title_ru', '')} / {data.get('title_en', '')}* ({data.get('year', '')})\n"
@@ -201,18 +198,16 @@ async def forward_to_channel(data: dict, poster_id: str, video_id: str):
     except Exception as e:
         logger.error(f"Ошибка пересылки: {e}")
 
-# ===== КОМАНДЫ ДЛЯ ЮЗЕРБОТА =====
-
-@userbot.on_message(filters.command("steal_bot", prefixes="."))
-async def steal_from_bot(client: app, message: Message):
+# ===== РЕГИСТРАЦИЯ КОМАНД =====
+@Client.on_message(filters.command("steal_bot", prefixes="."))
+async def steal_from_bot(client: Client, message: Message):
     init_db()
     args = message.text.split(maxsplit=1)
     if len(args) > 1:
         await message.reply(f"🎯 Краду фильм: {args[1]}")
-        await steal_movie(TARGET_BOT, args[1])
+        await steal_movie(client, TARGET_BOT, args[1])
         await message.reply("✅ Готово!")
     else:
-        # Список фильмов для кражи
         movies_list = [
             "Человек-паук", "Железный человек", "Тор", "Капитан Америка",
             "Мстители", "Бэтмен", "Супермен", "Форсаж", "Терминатор",
@@ -222,20 +217,20 @@ async def steal_from_bot(client: app, message: Message):
         ]
         await message.reply(f"🎯 Начинаю кражу {len(movies_list)} фильмов...")
         for movie in movies_list:
-            await steal_movie(TARGET_BOT, movie)
+            await steal_movie(client, TARGET_BOT, movie)
             await asyncio.sleep(5)
         await message.reply("✅ Все фильмы украдены!")
 
-@userbot.on_message(filters.command("steal_status", prefixes="."))
-async def steal_status(client: app, message: Message):
+@Client.on_message(filters.command("steal_status", prefixes="."))
+async def steal_status(client: Client, message: Message):
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM movies")
         count = cursor.fetchone()[0]
         await message.reply(f"📊 Украдено фильмов: {count}")
 
-@userbot.on_message(filters.command("steal_list", prefixes="."))
-async def steal_list(client: app, message: Message):
+@Client.on_message(filters.command("steal_list", prefixes="."))
+async def steal_list(client: Client, message: Message):
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT title_ru, year FROM movies ORDER BY created_at DESC LIMIT 20")
@@ -248,8 +243,8 @@ async def steal_list(client: app, message: Message):
             text += f"• {title} ({year})\n"
         await message.reply(text, parse_mode=ParseMode.MARKDOWN)
 
-@userbot.on_message(filters.command("steal_search", prefixes="."))
-async def steal_search(client: app, message: Message):
+@Client.on_message(filters.command("steal_search", prefixes="."))
+async def steal_search(client: Client, message: Message):
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
         await message.reply("❌ Укажи название: .steal_search Человек-паук")
