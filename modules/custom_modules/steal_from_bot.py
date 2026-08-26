@@ -1,29 +1,28 @@
 """
-Модуль для кражи фильмов у чужого бота
-Для Moon-Userbot by @loveaideep
+Модуль для Moon-Userbot: кража фильмов с автоматическим поиском и нажатием кнопок
+by @loveaideep
 """
 
 import asyncio
 import sqlite3
 import re
 import logging
-from pyrogram import filters, Client
-from pyrogram.types import Message
+from pyrogram import Client, filters
+from pyrogram.types import Message, CallbackQuery
 from pyrogram.enums import ParseMode
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# ===== КОНФИГ =====
-TARGET_BOT = "NitokinMoviesBot"  # ЧУЖОЙ БОТ (ЗАМЕНИ!)
-TARGET_CHANNEL = "your_channel"  # ТВОЙ КАНАЛ (ЗАМЕНИ!)
+LOGGER = logging.getLogger(__name__)
 DB_PATH = "movies.db"
 
-# ===== БАЗА ДАННЫХ =====
+# ===== КОНФИГ =====
+TARGET_BOT = "NitokinMedia23Bot"  # 👈 ИМЯ БОТА, У КОТОРОГО ВОРУЕМ
+TARGET_CHANNEL = "your_channel"  # 👈 ТВОЙ КАНАЛ
+SEARCH_DELAY = 5  # Задержка между запросами
+
+# ===== БАЗА =====
 def init_db():
     with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS movies (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title_ru TEXT,
@@ -31,233 +30,255 @@ def init_db():
                 year TEXT,
                 imdb_id TEXT,
                 imdb_rating TEXT,
-                description TEXT,
-                tags TEXT,
-                size TEXT,
                 poster_file_id TEXT,
                 video_file_id TEXT,
-                download_link TEXT,
                 source_bot TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        conn.commit()
 
-def movie_exists(title: str) -> bool:
+def save_movie(data):
     with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT id FROM movies WHERE title_ru LIKE ? OR title_en LIKE ?", (f"%{title}%", f"%{title}%"))
-        return cursor.fetchone() is not None
-
-def save_movie(data: dict):
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            INSERT INTO movies (
-                title_ru, title_en, year, imdb_id, imdb_rating,
-                description, tags, size, poster_file_id,
-                video_file_id, download_link, source_bot
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        conn.execute("""
+            INSERT INTO movies (title_ru, title_en, year, imdb_id, imdb_rating, poster_file_id, video_file_id, source_bot)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             data.get("title_ru"),
             data.get("title_en"),
             data.get("year"),
             data.get("imdb_id"),
             data.get("imdb_rating"),
-            data.get("description"),
-            data.get("tags"),
-            data.get("size"),
             data.get("poster_file_id"),
             data.get("video_file_id"),
-            data.get("download_link"),
             data.get("source_bot")
         ))
         conn.commit()
-        logger.info(f"💾 Сохранён: {data.get('title_ru')}")
 
-# ===== ФУНКЦИИ ДЛЯ РАБОТЫ С БОТОМ =====
-async def send_message_to_bot(app: Client, bot_username: str, text: str):
-    try:
-        msg = await app.send_message(bot_username, text)
-        await asyncio.sleep(2)
-        return msg
-    except Exception as e:
-        logger.error(f"Ошибка отправки боту: {e}")
-        return None
+def movie_exists(title):
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM movies WHERE title_ru LIKE ? OR title_en LIKE ?", (f"%{title}%", f"%{title}%"))
+        return cur.fetchone() is not None
 
-async def get_bot_response(app: Client, bot_username: str, limit: int = 5):
-    try:
-        responses = []
-        async for msg in app.get_chat_history(bot_username, limit=limit):
-            if msg.from_user and msg.from_user.is_bot:
-                responses.append(msg)
-        return responses
-    except Exception as e:
-        logger.error(f"Ошибка получения ответа: {e}")
-        return []
+def get_movies_count():
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM movies")
+        return cur.fetchone()[0]
 
-async def click_button(app: Client, bot_username: str, callback_data: str, message_id: int):
-    try:
-        await app.request_callback_answer(
-            chat_id=bot_username,
-            message_id=message_id,
-            callback_data=callback_data
-        )
-        await asyncio.sleep(3)
-        return True
-    except Exception as e:
-        logger.error(f"Ошибка нажатия кнопки: {e}")
-        return False
-
-async def extract_movie_data(text: str) -> dict:
+# ===== ФУНКЦИИ =====
+async def extract_movie(text):
     data = {}
-    match = re.search(r'^(.*?)\s*/\s*(.*?)\s*\((\d{4})\)', text)
-    if match:
-        data["title_ru"] = match.group(1).strip()
-        data["title_en"] = match.group(2).strip()
-        data["year"] = match.group(3)
-    imdb_match = re.search(r'imdb\.com/title/(tt\d+)', text)
-    if imdb_match:
-        data["imdb_id"] = imdb_match.group(1)
-    rating_match = re.search(r'(\d+\.\d+)/10\s*⭐', text)
-    if rating_match:
-        data["imdb_rating"] = rating_match.group(1)
-    size_match = re.search(r'Размер.*?:\s*(.*?)(?:\n|$)', text)
-    if size_match:
-        data["size"] = size_match.group(1).strip()
-    tags_match = re.search(r'Tags:\s*(#\S+(?:\s*#\S+)*)', text)
-    if tags_match:
-        data["tags"] = tags_match.group(1).strip()
-    download_match = re.search(r'Download.*?\((https://t\.me/[^\)]+)\)', text)
-    if download_match:
-        data["download_link"] = download_match.group(1)
+    m = re.search(r'^(.*?)\s*/\s*(.*?)\s*\((\d{4})\)', text)
+    if m:
+        data["title_ru"] = m.group(1).strip()
+        data["title_en"] = m.group(2).strip()
+        data["year"] = m.group(3)
+    m = re.search(r'imdb\.com/title/(tt\d+)', text)
+    if m:
+        data["imdb_id"] = m.group(1)
+    m = re.search(r'(\d+\.\d+)/10\s*⭐', text)
+    if m:
+        data["imdb_rating"] = m.group(1)
     return data
 
-async def steal_movie(app: Client, bot_username: str, movie_title: str):
-    logger.info(f"🎯 Начинаю кражу: {movie_title}")
+async def steal_from_bot(client, bot_name, search_query):
+    """
+    Основная функция кражи:
+    1. Пишет боту search_query
+    2. Ждёт ответ с кнопками
+    3. Нажимает на кнопку с фильмом
+    4. Забирает постер и видео
+    5. Сохраняет в БД и канал
+    """
+    LOGGER.info(f"🎯 Ищу фильм: {search_query}")
     
-    response = await send_message_to_bot(app, bot_username, movie_title)
-    if not response:
-        logger.error(f"❌ Нет ответа от бота по запросу: {movie_title}")
-        return
-    
-    if not response.reply_markup:
-        logger.warning(f"⚠️ Нет кнопок для: {movie_title}")
-        return
-    
-    for row in response.reply_markup.inline_keyboard:
-        for button in row:
-            if button.text and movie_title.lower() in button.text.lower():
-                logger.info(f"🔘 Нажимаю кнопку: {button.text}")
-                await click_button(app, bot_username, button.callback_data, response.id)
-                await asyncio.sleep(3)
-                
-                movie_data = None
-                poster_id = None
-                video_id = None
-                
-                async for msg in app.get_chat_history(bot_username, limit=10):
-                    if msg.from_user.is_bot:
-                        if msg.text and "IMDb" in msg.text:
-                            movie_data = await extract_movie_data(msg.text)
-                            if movie_data and movie_data.get("title_ru"):
-                                movie_data["source_bot"] = bot_username
-                                break
-                        if msg.photo and not poster_id:
-                            poster_id = msg.photo.file_id
-                        if msg.video and not video_id:
-                            video_id = msg.video.file_id
-                
-                if movie_data and movie_data.get("title_ru"):
-                    if not movie_exists(movie_data["title_ru"]):
-                        movie_data["poster_file_id"] = poster_id
-                        movie_data["video_file_id"] = video_id
-                        save_movie(movie_data)
-                        await forward_to_channel(app, movie_data, poster_id, video_id)
-                        logger.info(f"✅ Украден фильм: {movie_data['title_ru']}")
-                    else:
-                        logger.info(f"⏭️ Пропуск: {movie_data['title_ru']} уже есть")
-                else:
-                    logger.warning(f"⚠️ Не удалось извлечь данные для: {movie_title}")
-                break
-
-async def forward_to_channel(app: Client, data: dict, poster_id: str, video_id: str):
     try:
-        caption = (
-            f"🎬 *{data.get('title_ru', '')} / {data.get('title_en', '')}* ({data.get('year', '')})\n"
-            f"⭐ IMDb: {data.get('imdb_rating', 'N/A')}/10\n"
-            f"🏷️ {data.get('tags', '')}\n"
-            f"📦 Размер: {data.get('size', 'N/A')}\n"
-            f"🆔 IMDB: `{data.get('imdb_id', '')}`"
-        )
-        if poster_id:
-            await app.send_photo(chat_id=TARGET_CHANNEL, photo=poster_id, caption=caption, parse_mode=ParseMode.MARKDOWN)
-        if video_id:
-            await app.send_video(chat_id=TARGET_CHANNEL, video=video_id, caption="🎬 Видео")
-        logger.info(f"📤 Переслано в канал: {data.get('title_ru')}")
+        # 1. Отправляем запрос боту
+        await client.send_message(bot_name, search_query)
+        await asyncio.sleep(3)  # Ждём ответ
+        
+        # 2. Получаем последние ответы бота
+        msgs = []
+        async for msg in client.get_chat_history(bot_name, limit=10):
+            if msg.from_user and msg.from_user.is_bot:
+                msgs.append(msg)
+        
+        # 3. Ищем сообщение с кнопками и текстом
+        target_msg = None
+        for msg in msgs:
+            if msg.text and msg.reply_markup and "IMDb" in msg.text:
+                target_msg = msg
+                break
+        
+        if not target_msg:
+            LOGGER.warning(f"⚠️ Нет ответа от бота на запрос: {search_query}")
+            return False
+        
+        # 4. Ищем кнопку с фильмом (она может быть подписана как "Скачать", "Download" или просто название)
+        clicked = False
+        if target_msg.reply_markup:
+            for row in target_msg.reply_markup.inline_keyboard:
+                for btn in row:
+                    # Проверяем, что кнопка ведёт на фильм
+                    btn_text = btn.text.lower()
+                    if ("скачать" in btn_text or "download" in btn_text or 
+                        search_query.lower() in btn_text or "смотреть" in btn_text):
+                        LOGGER.info(f"🔘 Нажимаю кнопку: {btn.text}")
+                        await client.request_callback_answer(
+                            chat_id=bot_name,
+                            message_id=target_msg.id,
+                            callback_data=btn.callback_data
+                        )
+                        clicked = True
+                        await asyncio.sleep(3)  # Ждём ответ после нажатия
+                        break
+                if clicked:
+                    break
+        
+        if not clicked:
+            LOGGER.warning(f"⚠️ Не найдено кнопок для: {search_query}")
+            return False
+        
+        # 5. Забираем постер и видео из последних сообщений
+        poster = None
+        video = None
+        movie_text = None
+        
+        async for msg in client.get_chat_history(bot_name, limit=10):
+            if msg.photo and not poster:
+                poster = msg.photo.file_id
+                LOGGER.info(f"🖼️ Найден постер")
+            if msg.video and not video:
+                video = msg.video.file_id
+                LOGGER.info(f"🎬 Найдено видео")
+            if msg.text and "IMDb" in msg.text and not movie_text:
+                movie_text = msg.text
+        
+        # 6. Извлекаем данные о фильме
+        movie_data = await extract_movie(movie_text or target_msg.text)
+        if not movie_data.get("title_ru"):
+            LOGGER.warning(f"⚠️ Не удалось извлечь название фильма")
+            return False
+        
+        # 7. Проверяем, есть ли уже такой фильм
+        if movie_exists(movie_data["title_ru"]):
+            LOGGER.info(f"⏭️ {movie_data['title_ru']} уже есть в базе")
+            return True
+        
+        # 8. Сохраняем в базу
+        movie_data["poster_file_id"] = poster
+        movie_data["video_file_id"] = video
+        movie_data["source_bot"] = bot_name
+        save_movie(movie_data)
+        
+        # 9. Отправляем в канал
+        if poster:
+            await client.send_photo(
+                chat_id=TARGET_CHANNEL,
+                photo=poster,
+                caption=(
+                    f"🎬 *{movie_data.get('title_ru')} / {movie_data.get('title_en')}* ({movie_data.get('year')})\n"
+                    f"⭐ IMDb: {movie_data.get('imdb_rating', 'N/A')}/10\n"
+                    f"🆔 {movie_data.get('imdb_id')}"
+                ),
+                parse_mode=ParseMode.MARKDOWN
+            )
+        if video:
+            await client.send_video(chat_id=TARGET_CHANNEL, video=video, caption="🎬 Видео")
+        
+        LOGGER.info(f"✅ Украден: {movie_data['title_ru']}")
+        return True
+        
     except Exception as e:
-        logger.error(f"Ошибка пересылки: {e}")
+        LOGGER.error(f"❌ Ошибка при краже {search_query}: {e}")
+        return False
 
-# ===== РЕГИСТРАЦИЯ КОМАНД =====
+# ===== КОМАНДЫ =====
+
 @Client.on_message(filters.command("steal_bot", prefixes="."))
-async def steal_from_bot(client: Client, message: Message):
+async def cmd_steal_bot(client: Client, msg: Message):
+    """
+    .steal_bot Название_фильма - крадёт один фильм
+    .steal_bot - крадёт список фильмов из списка
+    """
     init_db()
-    args = message.text.split(maxsplit=1)
+    args = msg.text.split(maxsplit=1)
+    
     if len(args) > 1:
-        await message.reply(f"🎯 Краду фильм: {args[1]}")
-        await steal_movie(client, TARGET_BOT, args[1])
-        await message.reply("✅ Готово!")
+        # Крадём конкретный фильм
+        query = args[1]
+        await msg.reply(f"🎯 Краду: {query}...")
+        success = await steal_from_bot(client, TARGET_BOT, query)
+        if success:
+            await msg.reply(f"✅ Фильм украден!")
+        else:
+            await msg.reply(f"❌ Не удалось украсть: {query}")
     else:
+        # Крадём список фильмов
         movies_list = [
-            "Человек-паук", "Железный человек", "Тор", "Капитан Америка",
-            "Мстители", "Бэтмен", "Супермен", "Форсаж", "Терминатор",
-            "Матрица", "Властелин колец", "Гарри Поттер", "Пираты Карибского моря",
-            "Трансформеры", "Джон Уик", "Дэдпул", "Логан", "Веном",
-            "Доктор Стрэндж", "Черная пантера"
+            "Человек-паук",
+            "Железный человек", 
+            "Тор",
+            "Капитан Америка",
+            "Мстители",
+            "Бэтмен",
+            "Супермен",
+            "Форсаж",
+            "Терминатор",
+            "Матрица",
+            "Властелин колец",
+            "Гарри Поттер",
+            "Пираты Карибского моря",
+            "Трансформеры",
+            "Джон Уик",
+            "Дэдпул",
+            "Логан",
+            "Веном",
+            "Доктор Стрэндж",
+            "Черная пантера"
         ]
-        await message.reply(f"🎯 Начинаю кражу {len(movies_list)} фильмов...")
+        await msg.reply(f"🎯 Начинаю кражу {len(movies_list)} фильмов...")
+        
+        stolen = 0
         for movie in movies_list:
-            await steal_movie(client, TARGET_BOT, movie)
-            await asyncio.sleep(5)
-        await message.reply("✅ Все фильмы украдены!")
+            success = await steal_from_bot(client, TARGET_BOT, movie)
+            if success:
+                stolen += 1
+            await asyncio.sleep(SEARCH_DELAY)  # Пауза между запросами
+        
+        await msg.reply(f"✅ Украдено фильмов: {stolen}/{len(movies_list)}")
 
 @Client.on_message(filters.command("steal_status", prefixes="."))
-async def steal_status(client: Client, message: Message):
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM movies")
-        count = cursor.fetchone()[0]
-        await message.reply(f"📊 Украдено фильмов: {count}")
+async def cmd_steal_status(client: Client, msg: Message):
+    count = get_movies_count()
+    await msg.reply(f"📊 Украдено фильмов: {count}")
 
 @Client.on_message(filters.command("steal_list", prefixes="."))
-async def steal_list(client: Client, message: Message):
+async def cmd_steal_list(client: Client, msg: Message):
     with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT title_ru, year FROM movies ORDER BY created_at DESC LIMIT 20")
-        movies = cursor.fetchall()
-        if not movies:
-            await message.reply("📭 Фильмов пока нет")
-            return
-        text = "📋 *Последние украденные фильмы:*\n\n"
-        for title, year in movies:
-            text += f"• {title} ({year})\n"
-        await message.reply(text, parse_mode=ParseMode.MARKDOWN)
+        cur = conn.cursor()
+        cur.execute("SELECT title_ru, year FROM movies ORDER BY created_at DESC LIMIT 20")
+        rows = cur.fetchall()
+    if not rows:
+        await msg.reply("📭 В базе пока нет фильмов")
+        return
+    text = "📋 *Последние украденные фильмы:*\n" + "\n".join([f"• {r[0]} ({r[1]})" for r in rows])
+    await msg.reply(text, parse_mode=ParseMode.MARKDOWN)
 
 @Client.on_message(filters.command("steal_search", prefixes="."))
-async def steal_search(client: Client, message: Message):
-    args = message.text.split(maxsplit=1)
+async def cmd_steal_search(client: Client, msg: Message):
+    args = msg.text.split(maxsplit=1)
     if len(args) < 2:
-        await message.reply("❌ Укажи название: .steal_search Человек-паук")
+        await msg.reply("❌ .steal_search Название")
         return
-    query = args[1]
+    q = args[1]
     with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT title_ru, year, imdb_id FROM movies WHERE title_ru LIKE ? OR title_en LIKE ?", (f"%{query}%", f"%{query}%"))
-        movies = cursor.fetchall()
-        if not movies:
-            await message.reply(f"😕 Не найдено: {query}")
-            return
-        text = f"🔍 *Найдено {len(movies)} фильмов:*\n\n"
-        for title, year, imdb_id in movies:
-            text += f"• {title} ({year}) - `{imdb_id}`\n"
-        await message.reply(text, parse_mode=ParseMode.MARKDOWN)
+        cur = conn.cursor()
+        cur.execute("SELECT title_ru, year, imdb_id FROM movies WHERE title_ru LIKE ? OR title_en LIKE ?", (f"%{q}%", f"%{q}%"))
+        rows = cur.fetchall()
+    if not rows:
+        await msg.reply(f"😕 Не найдено: {q}")
+        return
+    text = f"🔍 *Найдено {len(rows)} фильмов:*\n" + "\n".join([f"• {r[0]} ({r[1]}) - `{r[2]}`" for r in rows])
+    await msg.reply(text, parse_mode=ParseMode.MARKDOWN)
