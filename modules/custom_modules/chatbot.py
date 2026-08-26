@@ -1,4 +1,4 @@
-#  Chatbot module: DeepSeek, answers everyone
+# Chatbot module: AI (OpenRouter / DeepSeek) — отвечает на упоминания
 import logging
 import re
 
@@ -7,14 +7,7 @@ from pyrogram import Client, enums, filters
 from pyrogram.types import Message
 
 from utils import modules_help, prefix
-from utils.config import (
-    anymodel_key,
-    deepseek_base_url,
-    deepseek_key,
-    deepseek_model,
-    owner_id,
-    owner_name,
-)
+from utils.config import ai_base_url, ai_key, ai_model, owner_id, owner_name
 
 log = logging.getLogger(__name__)
 
@@ -40,21 +33,12 @@ async def _owner_text(client):
 
 
 async def _chat(prompt, system):
-    if anymodel_key:
-        api_base = "https://anymodel.org/v1"
-        api_key = anymodel_key
-        api_model = "am/deepseek-v4-pro"
-    else:
-        api_base = deepseek_base_url
-        api_key = deepseek_key
-        api_model = deepseek_model
-
     headers = {
-        "Authorization": f"Bearer {api_key}",
+        "Authorization": f"Bearer {ai_key}",
         "Content-Type": "application/json",
     }
     payload = {
-        "model": api_model,
+        "model": ai_model,
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": prompt},
@@ -63,7 +47,7 @@ async def _chat(prompt, system):
     }
     async with aiohttp.ClientSession() as session:
         async with session.post(
-            api_base.rstrip("/") + "/chat/completions",
+            ai_base_url.rstrip("/") + "/chat/completions",
             headers=headers,
             json=payload,
             timeout=aiohttp.ClientTimeout(total=120),
@@ -84,10 +68,10 @@ async def chatbot(client, message: Message):
         message.from_user.id if message.from_user else "?",
         message.text or "",
     )
-    if not (deepseek_key or anymodel_key):
-        log.error("AI не ответил: ни DEEPSEEK_KEY, ни ANYMODEL_KEY не заданы!")
+    if not ai_key:
+        log.error("AI не ответил: AI_KEY не задан!")
         await message.reply_text(
-            "<b>Не задан ни DEEPSEEK_KEY, ни ANYMODEL_KEY в переменных окружения!</b>"
+            "<b>AI_KEY не задан в переменных окружения!</b>"
         )
         return
 
@@ -125,22 +109,13 @@ async def aistatus(_, message: Message):
     lines = ["<b>🤖 AI ChatBot Status</b>", ""]
     lines.append(f"• Модуль загружен: <b>да</b>")
     lines.append(
-        f"• ANYMODEL_KEY: "
-        + (f"<code>задан ({anymodel_key[:4]}...)</code>" if anymodel_key else "<b>❌ НЕ ЗАДАН</b>")
+        f"• AI_KEY: "
+        + (f"<code>задан ({ai_key[:4]}...)</code>" if ai_key else "<b>❌ НЕ ЗАДАН!</b>")
     )
-    lines.append(
-        f"• DEEPSEEK_KEY: "
-        + (f"<code>задан ({deepseek_key[:4]}...)</code>" if deepseek_key else "не задан")
-    )
+    lines.append(f"• URL API: <code>{ai_base_url}</code>")
+    lines.append(f"• Модель: <code>{ai_model}</code>")
 
-    if anymodel_key:
-        lines.append(f"• Активный эндпоинт: <code>https://anymodel.org/v1</code>")
-        lines.append(f"• Модель: <code>am/deepseek-v4-pro</code>")
-    else:
-        lines.append(f"• Эндпоинт: <code>{deepseek_base_url}</code>")
-        lines.append(f"• Модель: <code>{deepseek_model}</code>")
-
-    if anymodel_key or deepseek_key:
+    if ai_key:
         try:
             answer = await _chat("ping", "Отвечай одним словом.")
             lines.append("")
@@ -151,7 +126,7 @@ async def aistatus(_, message: Message):
             lines.append("→ проверьте ключ/модель/URL")
     else:
         lines.append("")
-        lines.append("→ Задайте ANYMODEL_KEY (или DEEPSEEK_KEY) в Variables на Railway")
+        lines.append("→ Задайте AI_KEY в Variables на Railway")
 
     await message.reply("\n".join(lines))
 
