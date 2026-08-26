@@ -27,18 +27,6 @@ apiflash_key = os.getenv("APIFLASH_KEY", env.str("APIFLASH_KEY"))
 rmbg_key = os.getenv("RMBG_KEY", env.str("RMBG_KEY", ""))
 vt_key = os.getenv("VT_KEY", env.str("VT_KEY", ""))
 gemini_key = os.getenv("GEMINI_KEY", env.str("GEMINI_KEY", ""))
-anymodel_key = os.getenv("ANYMODEL_KEY", env.str("ANYMODEL_KEY", "sk-dc9d4b7df36ba555-clksq9-be530a2a"))
-deepseek_key = os.getenv("DEEPSEEK_KEY", env.str("DEEPSEEK_KEY", ""))
-deepseek_base_url = os.getenv(
-    "DEEPSEEK_BASE_URL", env.str("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
-)
-deepseek_model = os.getenv("DEEPSEEK_MODEL", env.str("DEEPSEEK_MODEL", "deepseek-v4-flash"))
-owner_id = os.getenv("OWNER_ID", env.str("OWNER_ID", ""))
-owner_name = os.getenv("OWNER_NAME", env.str("OWNER_NAME", ""))
-mafia_start = os.getenv("MAFIA_START", env.str("MAFIA_START", "G_LTEwMDMxNTU1ODU0MzVfSTEzODQz"))
-mafia_groups = set(
-    int(x) for x in os.getenv("MAFIA_GROUPS", env.str("MAFIA_GROUPS", "-1003780077571,-1003155585435")).split(",")
-) if os.getenv("MAFIA_GROUPS", env.str("MAFIA_GROUPS", "")) else {-1003780077571, -1003155585435}
 cohere_key = os.getenv("COHERE_KEY", env.str("COHERE_KEY", ""))
 
 pm_limit = int(os.getenv("PM_LIMIT", env.int("PM_LIMIT", 4)))
@@ -49,3 +37,18 @@ modules_repo_branch = os.getenv(
 )
 
 port = int(os.getenv("PORT", env.int("PORT", 8000)))
+
+# ============================================================
+# ИСПРАВЛЕННЫЙ БЛОК – имена переменных СТРОЧНЫЕ (как на Railway)
+# ============================================================
+
+ai_base_url = os.getenv("ai_base_url", env.str("ai_base_url", "https://openrouter.ai/api/v1"))
+ai_key = os.getenv("ai_key", env.str("ai_key", ""))
+ai_model = os.getenv("ai_model", env.str("ai_model", "stealth/ox-alpha"))
+
+owner_id = os.getenv("OWNER_ID", env.int("OWNER_ID", 0))
+owner_name = os.getenv("OWNER_NAME", env.str("OWNER_NAME", ""))
+
+# Для совместимости со старым модулем mafia
+mafia_groups = []
+mafia_start = None
