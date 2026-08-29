@@ -3,10 +3,10 @@ import os
 import environs
 
 try:
-    env = environs.Env()
-    env.read_env("./.env")
+  env = environs.Env()
+  env.read_env("./.env")
 except FileNotFoundError:
-    print("No .env file found, using os.environ.")
+  print("No .env file found, using os.environ.")
 
 api_id = int(os.getenv("API_ID", env.int("API_ID")))
 api_hash = os.getenv("API_HASH", env.str("API_HASH"))
@@ -20,7 +20,8 @@ db_url = os.getenv("DATABASE_URL", env.str("DATABASE_URL", ""))
 db_name = os.getenv("DATABASE_NAME", env.str("DATABASE_NAME"))
 
 quotes_api = os.getenv(
-    "QUOTES_API", env.str("QUOTES_API", "https://quotes-o042.onrender.com/generate")
+    "QUOTES_API",
+    env.str("QUOTES_API", "https://quotes-o042.onrender.com/generate"),
 )
 
 apiflash_key = os.getenv("APIFLASH_KEY", env.str("APIFLASH_KEY"))
@@ -38,17 +39,15 @@ modules_repo_branch = os.getenv(
 
 port = int(os.getenv("PORT", env.int("PORT", 8000)))
 
-# ============================================================
-# ИСПРАВЛЕННЫЙ БЛОК – имена переменных СТРОЧНЫЕ (как на Railway)
-# ============================================================
+# AI Settings
+ai_base_url = os.getenv(
+    "AI_BASE_URL", env.str("AI_BASE_URL", "https://openrouter.ai/api/v1")
+)
+ai_key = os.getenv("AI_KEY", env.str("AI_KEY", ""))
+ai_model = os.getenv(
+    "AI_MODEL", env.str("AI_MODEL", "dots-studio/dots-3-note-preview:free")
+)
 
-ai_base_url = os.getenv("ai_base_url", env.str("ai_base_url", "https://openrouter.ai/api/v1"))
-ai_key = os.getenv("ai_key", env.str("ai_key", ""))
-ai_model = os.getenv("ai_model", env.str("ai_model", "stealth/ox-alpha"))
-
-owner_id = os.getenv("OWNER_ID", env.int("OWNER_ID", 0))
-owner_name = os.getenv("OWNER_NAME", env.str("OWNER_NAME", ""))
-
-# Для совместимости со старым модулем mafia
-mafia_groups = []
-mafia_start = None
+# Owner Settings
+owner_id = int(os.getenv("OWNER_ID", env.int("OWNER_ID", 0)))
+owner_name = os.getenv("OWNER_NAME", env.str("OWNER_NAME", "Owner"))
