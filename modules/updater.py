@@ -33,6 +33,51 @@ def check_command(command):
     return shutil.which(command) is not None
 
 
+def get_remote_branch(repo):
+    """
+    Удалённая ветка, из которой обновляться:
+    upstream текущей ветки -> одноимённая на origin -> main -> master.
+    Возвращает (remote_ref, branch_name) или (None, None).
+    """
+    branch = None
+    try:
+        # refs.follow() возвращает (цепочку ссылок, sha)
+        chain, _sha = repo.refs.follow(Ref(b"HEAD"))
+        head_ref = chain[-1] if chain else None
+        if head_ref and head_ref.startswith(b"refs/heads/"):
+            branch = head_ref[len(b"refs/heads/") :].decode()
+    except Exception:  # noqa: BLE001
+        branch = None
+
+    candidates = []
+    if branch:
+        try:
+            config = repo.get_config()
+            remote_name = config.get((b"branch", branch.encode()), b"remote")
+            merge_ref = config.get((b"branch", branch.encode()), b"merge")
+            if remote_name and merge_ref:
+                if merge_ref.startswith(b"refs/heads/"):
+                    merge_ref = merge_ref[len(b"refs/heads/") :]
+                candidates.append(
+                    (
+                        f"refs/remotes/{remote_name.decode()}/{merge_ref.decode()}",
+                        merge_ref.decode(),
+                    )
+                )
+        except Exception:  # noqa: BLE001
+            pass
+        candidates.append((f"refs/remotes/origin/{branch}", branch))
+
+    candidates.append(("refs/remotes/origin/main", "main"))
+    candidates.append(("refs/remotes/origin/master", "master"))
+
+    for ref, name in dict.fromkeys(candidates):
+        remote_ref = Ref(ref.encode())
+        if remote_ref in repo.refs:
+            return remote_ref, name.encode()
+    return None, None
+
+
 @Client.on_message(filters.command("restart", prefix) & filters.me)
 async def restart_cmd(_, message: Message):
     db.set(
@@ -81,10 +126,16 @@ async def update(_, message: Message):
             )
 
         porcelain.fetch(gitrepo, b"origin")
-        origin_main_sha = gitrepo.refs[Ref(b"refs/remotes/origin/main")]
-        gitrepo.refs[Ref(b"refs/heads/main")] = origin_main_sha
-        gitrepo.refs.set_symbolic_ref(Ref(b"HEAD"), Ref(b"refs/heads/main"))
-        porcelain.reset(gitrepo, "hard", treeish=origin_main_sha)
+        remote_ref, branch = get_remote_branch(gitrepo)
+        if remote_ref is None:
+            raise RuntimeError(
+                "Can't find remote branch to update from (origin/main, origin/master)"
+            )
+        remote_sha = gitrepo.refs[remote_ref]
+        local_ref = Ref(b"refs/heads/" + branch)
+        gitrepo.refs[local_ref] = remote_sha
+        gitrepo.refs.set_symbolic_ref(Ref(b"HEAD"), local_ref)
+        porcelain.reset(gitrepo, "hard", treeish=remote_sha)
 
         if (
             os.path.exists("requirements.txt")
