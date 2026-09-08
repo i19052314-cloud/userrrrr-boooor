@@ -16,6 +16,7 @@
 
 import asyncio
 import importlib
+import importlib.util
 import math
 import os
 import re
@@ -444,19 +445,59 @@ def resize_new_image(image_path, output_path, desired_width=None, desired_height
         os.remove(image_path)
 
 
+def resolve_module_path(module_name: str, core: bool = False) -> str:
+    """
+    Строит dotted-путь модуля. Поддерживаются как простые имена
+    (`chatbot` -> modules.custom_modules.chatbot), так и уже готовые
+    относительные пути (`custom_modules.pkg.mod` -> modules.custom_modules.pkg.mod).
+    """
+    module_name = module_name.replace("/", ".").strip(".")
+    if module_name.startswith("modules."):
+        return module_name
+    if "." in module_name:
+        return f"modules.{module_name}"
+    return f"modules.{'custom_modules.' if not core else ''}{module_name}"
+
+
+def read_source(file_path: str) -> str:
+    """Читает исходник модуля, не ограничиваясь одной кодировкой."""
+    with open(file_path, "rb") as f:
+        raw = f.read()
+    for encoding in ("utf-8", "cp1251", "latin-1"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
+def is_third_party(name: str) -> bool:
+    """Похоже ли имя на отсутствующий сторонний пакет (который можно pip install)."""
+    if not name or name.startswith(".") or name.startswith("_"):
+        return False
+    if name in sys.stdlib_module_names or name in sys.builtin_module_names:
+        return False
+    if name in sys.modules or name in ("utils", "modules"):
+        return False
+    try:
+        return importlib.util.find_spec(name) is None
+    except (ImportError, ValueError, AttributeError):
+        return False
+
+
 async def load_module(
     module_name: str,
     client: Client,
     message: Message = None,
     core=False,
 ) -> ModuleType:
-    if module_name in modules_help and not core:
+    stem = module_name.replace("/", ".").strip(".").split(".")[-1]
+    if stem in modules_help and not core:
         await unload_module(module_name, client)
 
-    path = f"modules.{'custom_modules.' if not core else ''}{module_name}"
+    path = resolve_module_path(module_name, core)
 
-    with open(f"{path.replace('.', '/')}.py", encoding="utf-8") as f:
-        code = f.read()
+    code = read_source(f"{path.replace('.', '/')}.py")
     meta = parse_meta_comments(code)
 
     packages = meta.get("requires", "").split()
@@ -465,15 +506,22 @@ async def load_module(
     try:
         module = importlib.import_module(path)
     except ImportError as e:
-        if core:
+        missing = getattr(e, "name", None) or ""
+        missing_top = (missing.split(".")[0] if missing else "") or ""
+
+        to_install = list(packages)
+        # Если модуль тянет не declared библиотеку — ставим её автоматически
+        if missing_top and is_third_party(missing_top) and missing_top not in to_install:
+            to_install.append(missing_top)
+
+        if not to_install:
             # Core modules shouldn't raise ImportError
             raise
 
-        if not packages:
-            raise
-
         if message:
-            await message.edit(f"<b>Installing requirements: {' '.join(packages)}</b>")
+            await message.edit(
+                f"<b>Installing requirements: {' '.join(to_install)}</b>"
+            )
 
         proc = await asyncio.create_subprocess_exec(
             sys.executable,
@@ -481,10 +529,10 @@ async def load_module(
             "pip",
             "install",
             "-U",
-            *packages,
+            *to_install,
         )
         try:
-            await asyncio.wait_for(proc.wait(), timeout=120)
+            await asyncio.wait_for(proc.wait(), timeout=300)
         except asyncio.TimeoutError:
             if message:
                 await message.edit(
@@ -518,8 +566,30 @@ async def load_module(
 
 
 async def unload_module(module_name: str, client: Client) -> bool:
-    path = "modules.custom_modules." + module_name
-    if path not in sys.modules:
+    """
+    Выгружает модуль. Работает и с кастомными, и со встроенными модулями,
+    в том числе лежащими во вложенных папках.
+    """
+    stem = module_name.replace("/", ".").strip(".").split(".")[-1]
+
+    candidates = []
+    if module_name.startswith("modules."):
+        candidates.append(module_name)
+    else:
+        candidates.extend(
+            [
+                f"modules.custom_modules.{module_name}",
+                f"modules.{module_name}",
+                resolve_module_path(module_name),
+                resolve_module_path(module_name, core=True),
+            ]
+        )
+
+    path = next(
+        (candidate for candidate in dict.fromkeys(candidates) if candidate in sys.modules),
+        None,
+    )
+    if path is None:
         return False
 
     module = importlib.import_module(path)
@@ -529,7 +599,7 @@ async def unload_module(module_name: str, client: Client) -> bool:
             for handler, group in getattr(obj, "handlers", []):
                 client.remove_handler(handler, group)
 
-    modules_help.pop(module_name, None)
+    modules_help.pop(stem, None)
     del sys.modules[path]
 
     help_navigator = ModuleManager.get_instance().help_navigator

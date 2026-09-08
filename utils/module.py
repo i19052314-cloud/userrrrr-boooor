@@ -25,11 +25,20 @@ class ModuleManager:
 
     async def load_modules(self, app: Client, loader: Callable):
         """Load all modules and initialize help navigator"""
-        for path in Path("modules").rglob("*.py"):
+        for path in sorted(Path("modules").rglob("*.py")):
+            rel = path.relative_to("modules")
+            parts = rel.with_suffix("").parts
+
+            # Пропускаем служебные файлы/папки, всё остальное грузим как есть,
+            # в том числе модули из вложенных папок
+            if any(part.startswith("__") for part in rel.parts) or parts[-1].startswith(
+                "_"
+            ):
+                continue
+
+            module_name = ".".join(parts)
             try:
-                await loader(
-                    path.stem, app, core="custom_modules" not in path.parent.parts
-                )
+                await loader(module_name, app, core="custom_modules" not in parts)
             except Exception:
                 logging.warning("Can't import module %s", path.stem, exc_info=True)
                 self.failed_modules += 1
@@ -69,8 +78,10 @@ class HelpNavigator:
         start_index = (self.current_page - 1) * 10
         end_index = start_index + 10
         page_modules = self.module_list[start_index:end_index]
-        text = "<b>Moon-Userbot</b>\n"
-        text += f"For more help on how to use a command, type <code>{prefix}help [module]</code>\n\n"
+        text = (
+            f"For more help on how to use a command, "
+            f"type <code>{prefix}help [module]</code>\n\n"
+        )
         text += f"Help Page No: {self.current_page}/{self.total_pages}\n\n"
         for module_name in page_modules:
             commands = modules_help[module_name]
