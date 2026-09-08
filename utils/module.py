@@ -25,11 +25,20 @@ class ModuleManager:
 
     async def load_modules(self, app: Client, loader: Callable):
         """Load all modules and initialize help navigator"""
-        for path in Path("modules").rglob("*.py"):
+        for path in sorted(Path("modules").rglob("*.py")):
+            rel = path.relative_to("modules")
+            parts = rel.with_suffix("").parts
+
+            # Пропускаем служебные файлы/папки, всё остальное грузим как есть,
+            # в том числе модули из вложенных папок
+            if any(part.startswith("__") for part in rel.parts) or parts[-1].startswith(
+                "_"
+            ):
+                continue
+
+            module_name = ".".join(parts)
             try:
-                await loader(
-                    path.stem, app, core="custom_modules" not in path.parent.parts
-                )
+                await loader(module_name, app, core="custom_modules" not in parts)
             except Exception:
                 logging.warning("Can't import module %s", path.stem, exc_info=True)
                 self.failed_modules += 1
