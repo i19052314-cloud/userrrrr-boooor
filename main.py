@@ -117,11 +117,13 @@ async def load_missing_modules():
     custom_modules_path = f"{SCRIPT_PATH}/modules/custom_modules"
     os.makedirs(custom_modules_path, exist_ok=True)
 
+    modules_repo = getattr(config, "modules_repo", "The-MoonTg-project/custom_modules")
+
     try:
         async with (
             aiohttp.ClientSession() as session,
             session.get(
-                f"https://raw.githubusercontent.com/The-MoonTg-project/custom_modules/{config.modules_repo_branch}/full.txt"
+                f"https://raw.githubusercontent.com/{modules_repo}/{config.modules_repo_branch}/full.txt"
             ) as resp,
         ):
             f = await resp.text()
@@ -136,7 +138,7 @@ async def load_missing_modules():
         for module_name in all_modules:
             module_path = f"{custom_modules_path}/{module_name}.py"
             if not os.path.exists(module_path) and module_name in modules_dict:
-                url = f"https://raw.githubusercontent.com/The-MoonTg-project/custom_modules/{config.modules_repo_branch}/{modules_dict[module_name]}.py"
+                url = f"https://raw.githubusercontent.com/{modules_repo}/{config.modules_repo_branch}/{modules_dict[module_name]}.py"
                 async with session.get(url) as resp:
                     if resp.status == 200:
                         with open(module_path, "wb") as f:

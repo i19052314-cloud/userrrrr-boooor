@@ -33,6 +33,10 @@ cohere_key = os.getenv("COHERE_KEY", env.str("COHERE_KEY", ""))
 pm_limit = int(os.getenv("PM_LIMIT", env.int("PM_LIMIT", 4)))
 
 test_server = bool(os.getenv("TEST_SERVER", env.bool("TEST_SERVER", False)))
+modules_repo = os.getenv(
+    "MODULES_REPO",
+    env.str("MODULES_REPO", "The-MoonTg-project/custom_modules"),
+)
 modules_repo_branch = os.getenv(
     "MODULES_REPO_BRANCH", env.str("MODULES_REPO_BRANCH", "main")
 )

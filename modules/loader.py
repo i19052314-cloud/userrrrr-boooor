@@ -37,7 +37,7 @@ from pyrogram import Client, filters
 from pyrogram.types import Message
 
 from utils import modules_help, prefix
-from utils.config import modules_repo_branch
+from utils.config import modules_repo, modules_repo_branch
 from utils.db import db
 from utils.scripts import load_module as base_load_module, unload_module
 
@@ -45,7 +45,7 @@ BASE_PATH = os.path.abspath(os.getcwd())
 MODULES_DIR = os.path.join(BASE_PATH, "modules")
 CUSTOM_DIR = os.path.join(MODULES_DIR, "custom_modules")
 REPO_RAW_URL = (
-    "https://raw.githubusercontent.com/The-MoonTg-project/custom_modules/"
+    f"https://raw.githubusercontent.com/{modules_repo}/"
     f"{modules_repo_branch}"
 )
 
